@@ -1,21 +1,6 @@
 import { z } from "zod";
 
-export const RESERVED_CODES = [
-  "admin",
-  "login",
-  "test",
-  "password",
-  "root",
-  "api",
-  "room",
-  "share",
-  "null",
-  "undefined",
-  "create",
-  "download",
-  "public",
-  "system",
-];
+export const RESERVED_CODES: string[] = [];
 
 export const roomCodeSchema = z
   .string()
@@ -30,10 +15,7 @@ export const customCodeSchema = z
   .toLowerCase()
   .min(6, "Use 6–20 letters, numbers or hyphens")
   .max(20, "Use 6–20 letters, numbers or hyphens")
-  .regex(/^[a-z0-9-]+$/, "Use 6–20 letters, numbers or hyphens")
-  .refine((val) => !RESERVED_CODES.includes(val), {
-    message: "This code is reserved and cannot be used",
-  });
+  .regex(/^[a-z0-9-]+$/, "Use 6–20 letters, numbers or hyphens");
 
 export const fileItemSchema = z.object({
   name: z.string().min(1, "File name is required"),
