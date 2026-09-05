@@ -76,13 +76,13 @@ export default function RoomPage() {
       className="max-w-2xl mx-auto space-y-6 py-6"
     >
       {/* Top Banner */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-4 shadow-sm">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-4 shadow-xl">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
           <div className="space-y-1">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Files shared with you
             </span>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               {room.uploader_name} shared {fileCount} {fileCount === 1 ? "file" : "files"}
             </h1>
           </div>
@@ -94,20 +94,20 @@ export default function RoomPage() {
         </div>
 
         <div className="flex items-center space-x-2 text-xs text-slate-400 font-mono">
-          <Share2 className="w-3.5 h-3.5 text-blue-600" />
+          <Share2 className="w-3.5 h-3.5 text-blue-400" />
           <span>Code: {room.room_code}</span>
         </div>
       </div>
 
       {/* Shared File List */}
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-slate-900 px-1 flex items-center space-x-2">
-          <FolderDown className="w-4 h-4 text-blue-600" />
+        <h3 className="text-sm font-semibold text-white px-1 flex items-center space-x-2">
+          <FolderDown className="w-4 h-4 text-blue-400" />
           <span>Shared Files</span>
         </h3>
 
         {fileCount === 0 ? (
-          <div className="p-8 text-center bg-white border border-slate-200 rounded-2xl text-slate-400 text-sm">
+          <div className="p-8 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-sm">
             No files found in this share.
           </div>
         ) : (
