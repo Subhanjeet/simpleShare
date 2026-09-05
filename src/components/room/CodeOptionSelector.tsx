@@ -137,7 +137,7 @@ export const CodeOptionSelector: React.FC<CodeOptionSelectorProps> = ({
 
             <div className="space-y-1">
               <span className="text-sm font-medium text-slate-200 block">
-                Generate a code for me
+                Generate a code
               </span>
               <span className="inline-block text-xs font-mono font-bold tracking-widest text-blue-400 bg-blue-950/60 border border-blue-800/60 rounded px-2 py-0.5">
                 {generatedPreview}

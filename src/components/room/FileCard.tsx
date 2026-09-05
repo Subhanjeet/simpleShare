@@ -31,9 +31,9 @@ export const FileCard: React.FC<FileCardProps> = ({ file, roomCode }) => {
   };
 
   return (
-    <div className="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all shadow-sm">
+    <div className="flex items-center justify-between p-4 rounded-xl bg-slate-100/[0.08] border border-slate-700/80 hover:border-slate-600 hover:bg-slate-100/[0.12] transition-all shadow-sm">
       <div className="flex items-center space-x-3.5 min-w-0 pr-3">
-        <div className="w-10 h-10 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center flex-shrink-0">
+        <div className="w-10 h-10 rounded-lg bg-blue-500/20 border border-blue-400/30 flex items-center justify-center flex-shrink-0">
           {getFileIcon(file.mime_type, file.original_name)}
         </div>
         <div className="min-w-0">

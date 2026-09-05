@@ -14,6 +14,11 @@ export const metadata: Metadata = {
   title: "SimpleShare | Drop. Connect. Share.",
   description: "Share files with friends for 7 days. Automatic deletion, no account required, instant room codes and QR sharing.",
   keywords: ["file sharing", "temporary storage", "QR code share", "SimpleShare", "7 day files"],
+  icons: {
+    icon: "/logo.jpg",
+    shortcut: "/logo.jpg",
+    apple: "/logo.jpg",
+  },
 };
 
 export default function RootLayout({
