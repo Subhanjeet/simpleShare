@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createRoomSchema, getLimitsFromEnv } from "@/lib/validation/room";
-import { createRoomInStore } from "@/lib/supabase/store";
+import { createRoomSchema, customCodeSchema, getLimitsFromEnv } from "@/lib/validation/room";
+import { createRoomInStore, isCodeAvailable } from "@/lib/supabase/store";
 import { ApiResponse, ShareRoom } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -9,10 +9,34 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<{
   try {
     const formData = await req.formData();
     const uploaderName = (formData.get("uploaderName") as string) || "Subhan";
+    const codeType = (formData.get("codeType") as string) || "generated";
+    const rawCustomCode = (formData.get("customCode") as string) || "";
     const files = formData.getAll("files") as File[];
 
     if (!files || files.length === 0) {
       return NextResponse.json({ data: null, error: "No files provided for upload" }, { status: 400 });
+    }
+
+    let customCodeToUse: string | undefined = undefined;
+
+    if (codeType === "custom") {
+      const codeValidation = customCodeSchema.safeParse(rawCustomCode);
+      if (!codeValidation.success) {
+        return NextResponse.json(
+          { data: null, error: codeValidation.error.errors[0]?.message || "Invalid custom share code" },
+          { status: 400 }
+        );
+      }
+      customCodeToUse = codeValidation.data;
+
+      // Server-side availability re-check (defense in depth against race conditions)
+      const availability = await isCodeAvailable(customCodeToUse);
+      if (!availability.available) {
+        return NextResponse.json(
+          { data: null, error: availability.reason || "Code already in use" },
+          { status: 400 }
+        );
+      }
     }
 
     const limits = getLimitsFromEnv();
@@ -55,7 +79,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<{
       return NextResponse.json({ data: null, error: validation.error.errors[0]?.message || "Invalid upload parameters" }, { status: 400 });
     }
 
-    const { room } = await createRoomInStore(uploaderName, fileItemsData);
+    const { room } = await createRoomInStore(uploaderName, fileItemsData, customCodeToUse);
 
     return NextResponse.json({ data: { room }, error: null }, { status: 201 });
   } catch (err: unknown) {

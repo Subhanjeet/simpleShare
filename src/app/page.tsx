@@ -7,6 +7,8 @@ import {
   UploadProgress,
   ShareRoomModal,
   RoomCodeInput,
+  CodeOptionSelector,
+  CodeOptionResult,
   Button,
 } from "@/components";
 import { SelectedFileItem, ShareRoom } from "@/types";
@@ -20,6 +22,11 @@ export default function HomePage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [createdRoom, setCreatedRoom] = useState<ShareRoom | null>(null);
+  const [codeOption, setCodeOption] = useState<CodeOptionResult>({
+    codeType: "generated",
+    customCode: "",
+    isValid: true,
+  });
 
   const limits = getLimitsFromEnv();
 
@@ -60,6 +67,8 @@ export default function HomePage() {
 
   const handleStartUpload = async () => {
     if (selectedFiles.length === 0) return;
+    if (codeOption.codeType === "custom" && !codeOption.isValid) return;
+
     setIsUploading(true);
     setUploadProgress(15);
     setErrorMessage(null);
@@ -67,6 +76,11 @@ export default function HomePage() {
     try {
       const formData = new FormData();
       formData.append("uploaderName", "Subhan");
+      formData.append("codeType", codeOption.codeType);
+      if (codeOption.codeType === "custom") {
+        formData.append("customCode", codeOption.customCode);
+      }
+
       selectedFiles.forEach((item) => {
         formData.append("files", item.file);
       });
@@ -144,6 +158,13 @@ export default function HomePage() {
             onClearAll={handleClearAll}
           />
 
+          {selectedFiles.length > 0 && !isUploading && (
+            <CodeOptionSelector
+              onChange={setCodeOption}
+              isDisabled={isUploading}
+            />
+          )}
+
           {isUploading && <UploadProgress progress={uploadProgress} />}
 
           {selectedFiles.length > 0 && !isUploading && (
@@ -152,6 +173,7 @@ export default function HomePage() {
                 variant="primary"
                 size="lg"
                 onClick={handleStartUpload}
+                isDisabled={!codeOption.isValid}
                 leftIcon={<Upload className="w-4 h-4" />}
               >
                 Create Share

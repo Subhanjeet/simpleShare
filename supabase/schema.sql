@@ -3,7 +3,7 @@
 -- 1. Create share_rooms table
 CREATE TABLE IF NOT EXISTS public.share_rooms (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  room_code VARCHAR(10) UNIQUE NOT NULL,
+  room_code VARCHAR(50) UNIQUE NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
   status VARCHAR(20) DEFAULT 'active' NOT NULL CHECK (status IN ('active', 'expired')),

@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "./server";
 import { ShareRoom, SharedFile } from "@/types";
 import { generateRoomCode } from "@/lib/utils/format";
+import { customCodeSchema } from "@/lib/validation/room";
 
 // In-Memory Fallback Storage for local testing without Supabase credentials
 const memoryRooms = new Map<string, ShareRoom>();
@@ -12,11 +13,68 @@ function isSupabaseConfigured(): boolean {
   return Boolean(url && !url.includes("placeholder") && !url.includes("xyz-simpleshare-mock") && key && !key.includes("mock"));
 }
 
+export async function isCodeAvailable(rawCode: string): Promise<{ available: boolean; reason?: string }> {
+  const validation = customCodeSchema.safeParse(rawCode);
+  if (!validation.success) {
+    return { available: false, reason: validation.error.errors[0]?.message || "Invalid code format" };
+  }
+
+  const normalizedCode = validation.data;
+
+  if (!isSupabaseConfigured()) {
+    for (const [existingCode, room] of Array.from(memoryRooms.entries())) {
+      if (existingCode.toLowerCase() === normalizedCode) {
+        if (new Date(room.expires_at).getTime() <= Date.now() || room.status === "expired") {
+          memoryRooms.delete(existingCode);
+        } else {
+          return { available: false, reason: "Code already in use" };
+        }
+      }
+    }
+    return { available: true };
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data: room } = await supabase
+    .from("share_rooms")
+    .select("id, room_code, expires_at, status")
+    .ilike("room_code", normalizedCode)
+    .single();
+
+  if (!room) {
+    return { available: true };
+  }
+
+  if (new Date(room.expires_at).getTime() <= Date.now() || room.status === "expired") {
+    await deleteExpiredRoomFromStore(room.id, room.room_code);
+    return { available: true };
+  }
+
+  return { available: false, reason: "Code already in use" };
+}
+
 export async function createRoomInStore(
   uploaderName: string,
-  filesData: { originalName: string; mimeType: string; fileSize: number; contentBuffer?: Buffer }[]
+  filesData: { originalName: string; mimeType: string; fileSize: number; contentBuffer?: Buffer }[],
+  customCode?: string
 ): Promise<{ room: ShareRoom; files: SharedFile[] }> {
-  const code = generateRoomCode();
+  let code = customCode ? customCode.trim().toLowerCase() : generateRoomCode();
+
+  if (customCode) {
+    const availability = await isCodeAvailable(customCode);
+    if (!availability.available) {
+      throw new Error(availability.reason || "Code already in use");
+    }
+  } else {
+    let attempts = 0;
+    while (attempts < 5) {
+      const availability = await isCodeAvailable(code);
+      if (availability.available) break;
+      code = generateRoomCode();
+      attempts++;
+    }
+  }
+
   const createdAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // Exactly 7 days
 
@@ -55,7 +113,7 @@ export async function createRoomInStore(
       files: createdFiles,
     };
 
-    memoryRooms.set(code, room);
+    memoryRooms.set(code.toLowerCase(), room);
     return { room, files: createdFiles };
   }
 
@@ -74,6 +132,9 @@ export async function createRoomInStore(
     .single();
 
   if (roomError || !roomData) {
+    if (roomError?.code === "23505" || roomError?.message?.includes("unique constraint")) {
+      throw new Error("Code already in use. Please choose another.");
+    }
     throw new Error(`Failed to create room in Supabase: ${roomError?.message || "Unknown error"}`);
   }
 
@@ -98,7 +159,7 @@ export async function createRoomInStore(
     }
 
     // Insert database record
-    const { data: fileData, error: fileError } = await supabase
+    const { data: fileData } = await supabase
       .from("shared_files")
       .insert({
         id: fileId,
@@ -127,15 +188,24 @@ export async function createRoomInStore(
 }
 
 export async function getRoomByCodeFromStore(code: string): Promise<ShareRoom | null> {
-  const uppercaseCode = code.toUpperCase().trim();
+  const cleanCode = code.trim().toLowerCase();
 
   if (!isSupabaseConfigured()) {
-    const room = memoryRooms.get(uppercaseCode);
+    let room = memoryRooms.get(cleanCode);
+    if (!room) {
+      for (const [k, r] of Array.from(memoryRooms.entries())) {
+        if (k.toLowerCase() === cleanCode) {
+          room = r;
+          break;
+        }
+      }
+    }
+
     if (!room) return null;
 
     // Check expiration
     if (new Date(room.expires_at).getTime() <= Date.now()) {
-      memoryRooms.delete(uppercaseCode);
+      memoryRooms.delete(room.room_code.toLowerCase());
       return null; // Expired
     }
     return room;
@@ -147,14 +217,14 @@ export async function getRoomByCodeFromStore(code: string): Promise<ShareRoom | 
   const { data: room, error: roomError } = await supabase
     .from("share_rooms")
     .select("*")
-    .eq("room_code", uppercaseCode)
+    .ilike("room_code", cleanCode)
     .single();
 
   if (roomError || !room) return null;
 
   if (new Date(room.expires_at).getTime() <= Date.now() || room.status === "expired") {
     // Purge expired room immediately
-    await deleteExpiredRoomFromStore(room.id, uppercaseCode);
+    await deleteExpiredRoomFromStore(room.id, room.room_code);
     return null;
   }
 
@@ -166,7 +236,7 @@ export async function getRoomByCodeFromStore(code: string): Promise<ShareRoom | 
 
   const formattedFiles = (files || []).map((f) => ({
     ...f,
-    download_url: `/api/rooms/${uppercaseCode}/download/${f.id}`,
+    download_url: `/api/rooms/${room.room_code}/download/${f.id}`,
   }));
 
   return {

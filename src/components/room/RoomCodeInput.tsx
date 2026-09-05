@@ -10,13 +10,13 @@ export const RoomCodeInput: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanCode = code.trim().toUpperCase();
-    if (!cleanCode || cleanCode.length !== 6) {
-      setErrorText("Please enter a valid 6-character code");
+    const cleanCode = code.trim().toLowerCase();
+    if (!cleanCode || cleanCode.length < 6 || cleanCode.length > 20) {
+      setErrorText("Please enter a valid share code (6–20 characters)");
       return;
     }
     setErrorText(null);
-    router.push(`/room/${cleanCode}`);
+    router.push(`/room/${encodeURIComponent(cleanCode)}`);
   };
 
   return (
@@ -32,14 +32,14 @@ export const RoomCodeInput: React.FC = () => {
       <div className="flex flex-col sm:flex-row gap-3">
         <input
           type="text"
-          maxLength={6}
-          placeholder="Enter 6-character code"
+          maxLength={20}
+          placeholder="Enter share code (e.g. X7K92P or my-code)"
           value={code}
           onChange={(e) => {
-            setCode(e.target.value.toUpperCase());
+            setCode(e.target.value.replace(/[^a-zA-Z0-9-]/g, ""));
             if (errorText) setErrorText(null);
           }}
-          className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-center text-lg font-mono uppercase tracking-widest font-bold text-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-slate-500 placeholder:normal-case placeholder:tracking-normal placeholder:text-sm placeholder:font-normal"
+          className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-center text-base sm:text-lg font-mono tracking-wider font-bold text-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-slate-500 placeholder:normal-case placeholder:tracking-normal placeholder:text-xs sm:placeholder:text-sm placeholder:font-normal"
         />
         <Button
           type="submit"

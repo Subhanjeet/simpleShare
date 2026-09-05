@@ -5,3 +5,4 @@ export * from "./ExpiryTimer";
 export * from "./FileCard";
 export * from "./DownloadButton";
 export * from "./ExpiredRoom";
+export * from "./CodeOptionSelector";
