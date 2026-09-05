@@ -37,3 +37,20 @@ export interface SelectedFileItem {
   size: number;
   type: string;
 }
+
+export interface ActiveFileItem {
+  id: string;
+  name: string;
+  size: number;
+  roomCode: string;
+  expiresAt: string;
+}
+
+export interface AppStats {
+  users: number;
+  shares: number;
+  files: number;
+  activeFiles: ActiveFileItem[];
+}
+
+

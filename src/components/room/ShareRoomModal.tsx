@@ -21,16 +21,41 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({ room, onReset })
 
   const timeRemaining = getTimeRemaining(room.expires_at);
 
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(room.room_code);
-    setHasCopiedCode(true);
-    setTimeout(() => setHasCopiedCode(false), 2000);
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const successful = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      return successful;
+    } catch {
+      return false;
+    }
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(shareUrl);
-    setHasCopiedLink(true);
-    setTimeout(() => setHasCopiedLink(false), 2000);
+  const handleCopyCode = async () => {
+    const success = await copyToClipboard(room.room_code);
+    if (success) {
+      setHasCopiedCode(true);
+      setTimeout(() => setHasCopiedCode(false), 2000);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    const success = await copyToClipboard(shareUrl);
+    if (success) {
+      setHasCopiedLink(true);
+      setTimeout(() => setHasCopiedLink(false), 2000);
+    }
   };
 
   return (

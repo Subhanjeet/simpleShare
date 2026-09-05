@@ -98,3 +98,56 @@ BEGIN
   RETURN QUERY SELECT v_deleted_rooms_count, v_deleted_files_count;
 END;
 $$;
+
+-- 6. Live Statistics Setup (Lifetime Users, Shares & Active Files)
+CREATE TABLE IF NOT EXISTS public.app_stats (
+  id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  total_users BIGINT NOT NULL DEFAULT 0,
+  total_shares BIGINT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+INSERT INTO public.app_stats (id, total_users, total_shares)
+VALUES (1, 0, 0)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.anonymous_users (
+  id UUID PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+ALTER TABLE public.app_stats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.anonymous_users ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public read app_stats" ON public.app_stats
+  FOR SELECT USING (true);
+
+-- Atomic RPC function to safely record share creation & new uploader count
+CREATE OR REPLACE FUNCTION record_share_event(
+  p_anon_user_id UUID
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_is_new_user BOOLEAN := FALSE;
+BEGIN
+  IF p_anon_user_id IS NOT NULL THEN
+    INSERT INTO public.anonymous_users (id)
+    VALUES (p_anon_user_id)
+    ON CONFLICT (id) DO NOTHING;
+    
+    IF FOUND THEN
+      v_is_new_user := TRUE;
+    END IF;
+  END IF;
+
+  UPDATE public.app_stats
+  SET 
+    total_shares = total_shares + 1,
+    total_users = total_users + (CASE WHEN v_is_new_user THEN 1 ELSE 0 END),
+    updated_at = NOW()
+  WHERE id = 1;
+END;
+$$;

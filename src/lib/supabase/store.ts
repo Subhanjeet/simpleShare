@@ -1,16 +1,42 @@
 import { getSupabaseAdmin } from "./server";
-import { ShareRoom, SharedFile } from "@/types";
+import { ShareRoom, SharedFile, ActiveFileItem, AppStats } from "@/types";
 import { generateRoomCode } from "@/lib/utils/format";
 import { customCodeSchema } from "@/lib/validation/room";
+import {
+  mockIsCodeAvailable,
+  mockCreateRoom,
+  mockGetRoomByCode,
+  mockGetFileContent,
+  mockDeleteExpiredRoom,
+  mockPurgeAllExpiredRooms,
+  mockGetAppStats,
+} from "./mock-store";
 
-// In-Memory Fallback Storage for local testing without Supabase credentials
-const memoryRooms = new Map<string, ShareRoom>();
-const memoryFiles = new Map<string, { buffer: Buffer; metadata: SharedFile }>();
-
-function isSupabaseConfigured(): boolean {
+export function isSupabaseConfigured(): boolean {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  return Boolean(url && !url.includes("placeholder") && !url.includes("xyz-simpleshare-mock") && key && !key.includes("mock"));
+  return Boolean(
+    url &&
+      !url.includes("placeholder") &&
+      !url.includes("xyz-simpleshare-mock") &&
+      key &&
+      !key.includes("mock") &&
+      !key.includes("placeholder")
+  );
+}
+
+function assertStoreMode(): "supabase" | "mock" {
+  if (isSupabaseConfigured()) {
+    return "supabase";
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Database Configuration Error: Missing Supabase credentials in production environment. Shared-memory fallback is strictly disabled in production."
+    );
+  }
+
+  return "mock";
 }
 
 export async function isCodeAvailable(rawCode: string): Promise<{ available: boolean; reason?: string }> {
@@ -19,21 +45,12 @@ export async function isCodeAvailable(rawCode: string): Promise<{ available: boo
     return { available: false, reason: validation.error.errors[0]?.message || "Invalid code format" };
   }
 
-  const normalizedCode = validation.data;
-
-  if (!isSupabaseConfigured()) {
-    for (const [existingCode, room] of Array.from(memoryRooms.entries())) {
-      if (existingCode.toLowerCase() === normalizedCode) {
-        if (new Date(room.expires_at).getTime() <= Date.now() || room.status === "expired") {
-          memoryRooms.delete(existingCode);
-        } else {
-          return { available: false, reason: "Code already in use" };
-        }
-      }
-    }
-    return { available: true };
+  const mode = assertStoreMode();
+  if (mode === "mock") {
+    return mockIsCodeAvailable(rawCode);
   }
 
+  const normalizedCode = validation.data;
   const supabase = getSupabaseAdmin();
   const { data: room } = await supabase
     .from("share_rooms")
@@ -56,8 +73,14 @@ export async function isCodeAvailable(rawCode: string): Promise<{ available: boo
 export async function createRoomInStore(
   uploaderName: string,
   filesData: { originalName: string; mimeType: string; fileSize: number; contentBuffer?: Buffer }[],
-  customCode?: string
+  customCode?: string,
+  anonUserId?: string
 ): Promise<{ room: ShareRoom; files: SharedFile[] }> {
+  const mode = assertStoreMode();
+  if (mode === "mock") {
+    return mockCreateRoom(uploaderName, filesData, customCode, anonUserId);
+  }
+
   let code = customCode ? customCode.trim().toLowerCase() : generateRoomCode();
 
   if (customCode) {
@@ -76,48 +99,8 @@ export async function createRoomInStore(
   }
 
   const createdAt = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // Exactly 7 days
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  if (!isSupabaseConfigured()) {
-    // In-memory fallback mode
-    const roomId = `room-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-    const createdFiles: SharedFile[] = [];
-
-    for (const f of filesData) {
-      const fileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-      const storagePath = `${code}/${fileId}-${f.originalName}`;
-      const fileMeta: SharedFile = {
-        id: fileId,
-        room_id: roomId,
-        original_name: f.originalName,
-        storage_path: storagePath,
-        file_size: f.fileSize,
-        mime_type: f.mimeType,
-        created_at: createdAt,
-        download_url: `/api/rooms/${code}/download/${fileId}`,
-      };
-
-      if (f.contentBuffer) {
-        memoryFiles.set(fileId, { buffer: f.contentBuffer, metadata: fileMeta });
-      }
-      createdFiles.push(fileMeta);
-    }
-
-    const room: ShareRoom = {
-      id: roomId,
-      room_code: code,
-      created_at: createdAt,
-      expires_at: expiresAt,
-      status: "active",
-      uploader_name: uploaderName || "Subhan",
-      files: createdFiles,
-    };
-
-    memoryRooms.set(code.toLowerCase(), room);
-    return { room, files: createdFiles };
-  }
-
-  // Real Supabase PostgreSQL + Storage integration
   const supabase = getSupabaseAdmin();
   const { data: roomData, error: roomError } = await supabase
     .from("share_rooms")
@@ -144,7 +127,6 @@ export async function createRoomInStore(
     const fileId = crypto.randomUUID();
     const storagePath = `${code}/${fileId}-${f.originalName}`;
 
-    // Upload to Supabase Storage bucket 'simpleshare-files'
     if (f.contentBuffer) {
       const { error: uploadError } = await supabase.storage
         .from("simpleshare-files")
@@ -158,7 +140,6 @@ export async function createRoomInStore(
       }
     }
 
-    // Insert database record
     const { data: fileData } = await supabase
       .from("shared_files")
       .insert({
@@ -181,6 +162,16 @@ export async function createRoomInStore(
     }
   }
 
+  // Atomically record lifetime share & uploader stats using RPC
+  try {
+    const isValidUUID = anonUserId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(anonUserId);
+    await supabase.rpc("record_share_event", {
+      p_anon_user_id: isValidUUID ? anonUserId : null,
+    });
+  } catch (rpcErr) {
+    console.error("Failed to record share event stats RPC:", rpcErr);
+  }
+
   return {
     room: { ...roomData, files: createdFiles },
     files: createdFiles,
@@ -188,32 +179,14 @@ export async function createRoomInStore(
 }
 
 export async function getRoomByCodeFromStore(code: string): Promise<ShareRoom | null> {
-  const cleanCode = code.trim().toLowerCase();
-
-  if (!isSupabaseConfigured()) {
-    let room = memoryRooms.get(cleanCode);
-    if (!room) {
-      for (const [k, r] of Array.from(memoryRooms.entries())) {
-        if (k.toLowerCase() === cleanCode) {
-          room = r;
-          break;
-        }
-      }
-    }
-
-    if (!room) return null;
-
-    // Check expiration
-    if (new Date(room.expires_at).getTime() <= Date.now()) {
-      memoryRooms.delete(room.room_code.toLowerCase());
-      return null; // Expired
-    }
-    return room;
+  const mode = assertStoreMode();
+  if (mode === "mock") {
+    return mockGetRoomByCode(code);
   }
 
+  const cleanCode = code.trim().toLowerCase();
   const supabase = getSupabaseAdmin();
 
-  // Clean up inline if past expiration
   const { data: room, error: roomError } = await supabase
     .from("share_rooms")
     .select("*")
@@ -223,12 +196,10 @@ export async function getRoomByCodeFromStore(code: string): Promise<ShareRoom | 
   if (roomError || !room) return null;
 
   if (new Date(room.expires_at).getTime() <= Date.now() || room.status === "expired") {
-    // Purge expired room immediately
     await deleteExpiredRoomFromStore(room.id, room.room_code);
     return null;
   }
 
-  // Fetch associated files
   const { data: files } = await supabase
     .from("shared_files")
     .select("*")
@@ -246,21 +217,16 @@ export async function getRoomByCodeFromStore(code: string): Promise<ShareRoom | 
 }
 
 export async function getFileContentFromStore(code: string, fileId: string): Promise<{ buffer: Buffer; fileName: string; mimeType: string } | null> {
+  const mode = assertStoreMode();
+  if (mode === "mock") {
+    return mockGetFileContent(code, fileId);
+  }
+
   const room = await getRoomByCodeFromStore(code);
   if (!room) return null;
 
   const targetFile = room.files?.find((f) => f.id === fileId);
   if (!targetFile) return null;
-
-  if (!isSupabaseConfigured()) {
-    const memoryItem = memoryFiles.get(fileId);
-    if (!memoryItem) return null;
-    return {
-      buffer: memoryItem.buffer,
-      fileName: targetFile.original_name,
-      mimeType: targetFile.mime_type,
-    };
-  }
 
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase.storage
@@ -281,51 +247,29 @@ export async function getFileContentFromStore(code: string, fileId: string): Pro
 }
 
 export async function deleteExpiredRoomFromStore(roomId: string, code: string): Promise<void> {
-  if (!isSupabaseConfigured()) {
-    const room = memoryRooms.get(code);
-    if (room) {
-      if (room.files) {
-        for (const f of room.files) {
-          memoryFiles.delete(f.id);
-        }
-      }
-      memoryRooms.delete(code);
-    }
-    return;
+  const mode = assertStoreMode();
+  if (mode === "mock") {
+    return mockDeleteExpiredRoom(roomId, code);
   }
 
   const supabase = getSupabaseAdmin();
 
-  // Get files to delete storage paths
   const { data: files } = await supabase.from("shared_files").select("storage_path").eq("room_id", roomId);
   if (files && files.length > 0) {
     const paths = files.map((f) => f.storage_path);
     await supabase.storage.from("simpleshare-files").remove(paths);
   }
 
-  // Delete DB record (cascade deletes files)
   await supabase.from("share_rooms").delete().eq("id", roomId);
 }
 
 export async function purgeAllExpiredRooms(): Promise<{ deletedRoomsCount: number }> {
-  let count = 0;
-  const now = new Date().getTime();
-
-  if (!isSupabaseConfigured()) {
-    for (const [code, room] of Array.from(memoryRooms.entries())) {
-      if (new Date(room.expires_at).getTime() <= now || room.status === "expired") {
-        if (room.files) {
-          for (const f of room.files) {
-            memoryFiles.delete(f.id);
-          }
-        }
-        memoryRooms.delete(code);
-        count++;
-      }
-    }
-    return { deletedRoomsCount: count };
+  const mode = assertStoreMode();
+  if (mode === "mock") {
+    return mockPurgeAllExpiredRooms();
   }
 
+  let count = 0;
   const supabase = getSupabaseAdmin();
   const { data: expiredRooms } = await supabase
     .from("share_rooms")
@@ -340,4 +284,65 @@ export async function purgeAllExpiredRooms(): Promise<{ deletedRoomsCount: numbe
   }
 
   return { deletedRoomsCount: count };
+}
+
+
+
+export async function getAppStatsFromStore(): Promise<AppStats> {
+  const mode = assertStoreMode();
+  if (mode === "mock") {
+    return mockGetAppStats();
+  }
+
+  const supabase = getSupabaseAdmin();
+
+  // 1. Lifetime users & shares
+  const { data: statsData } = await supabase
+    .from("app_stats")
+    .select("total_users, total_shares")
+    .eq("id", 1)
+    .single();
+
+  // 2. Active files stored in non-expired rooms
+  const { data: activeRooms } = await supabase
+    .from("share_rooms")
+    .select("id, room_code, expires_at")
+    .gt("expires_at", new Date().toISOString())
+    .eq("status", "active");
+
+  let activeFilesCount = 0;
+  const activeFilesList: ActiveFileItem[] = [];
+
+  if (activeRooms && activeRooms.length > 0) {
+    const roomMap = new Map(activeRooms.map((r) => [r.id, r]));
+    const roomIds = activeRooms.map((r) => r.id);
+
+    const { data: filesData, count } = await supabase
+      .from("shared_files")
+      .select("id, room_id, original_name, file_size", { count: "exact" })
+      .in("room_id", roomIds)
+      .order("created_at", { ascending: false });
+
+    activeFilesCount = count || 0;
+
+    if (filesData) {
+      for (const f of filesData) {
+        const rm = roomMap.get(f.room_id);
+        activeFilesList.push({
+          id: f.id,
+          name: f.original_name,
+          size: f.file_size,
+          roomCode: rm?.room_code || "",
+          expiresAt: rm?.expires_at || "",
+        });
+      }
+    }
+  }
+
+  return {
+    users: Number(statsData?.total_users || 0),
+    shares: Number(statsData?.total_shares || 0),
+    files: activeFilesCount,
+    activeFiles: activeFilesList,
+  };
 }

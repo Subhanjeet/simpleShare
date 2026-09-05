@@ -11,6 +11,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<{
     const uploaderName = (formData.get("uploaderName") as string) || "Subhan";
     const codeType = (formData.get("codeType") as string) || "generated";
     const rawCustomCode = (formData.get("customCode") as string) || "";
+    const anonUserId = (formData.get("anonUserId") as string) || "";
     const files = formData.getAll("files") as File[];
 
     if (!files || files.length === 0) {
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<{
       return NextResponse.json({ data: null, error: validation.error.errors[0]?.message || "Invalid upload parameters" }, { status: 400 });
     }
 
-    const { room } = await createRoomInStore(uploaderName, fileItemsData, customCodeToUse);
+    const { room } = await createRoomInStore(uploaderName, fileItemsData, customCodeToUse, anonUserId);
 
     return NextResponse.json({ data: { room }, error: null }, { status: 201 });
   } catch (err: unknown) {

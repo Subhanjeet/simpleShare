@@ -1,4 +1,5 @@
 import React from "react";
+import Image from "next/image";
 import { Lock } from "lucide-react";
 
 export const Footer: React.FC = () => {
@@ -6,12 +7,17 @@ export const Footer: React.FC = () => {
     <footer className="w-full border-t border-slate-800/80 py-6 bg-slate-950 text-slate-400 text-xs mt-auto">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="flex items-center space-x-2">
-          <div className="w-6 h-6 rounded-lg overflow-hidden border border-slate-700 flex-shrink-0 bg-slate-900">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+          <div
+            className="w-6 h-6 rounded-lg overflow-hidden border border-slate-700 flex-shrink-0 bg-slate-900"
+            style={{ width: "24px", height: "24px", minWidth: "24px", minHeight: "24px" }}
+          >
+            <Image
               src="/logo.jpg"
               alt="SimpleShare Logo"
+              width={24}
+              height={24}
               className="w-full h-full object-cover"
+              style={{ width: "24px", height: "24px", objectFit: "cover" }}
             />
           </div>
           <div className="flex items-center space-x-1.5 font-medium text-slate-400">
