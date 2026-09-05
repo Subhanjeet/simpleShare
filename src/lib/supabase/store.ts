@@ -162,14 +162,56 @@ export async function createRoomInStore(
     }
   }
 
-  // Atomically record lifetime share & uploader stats using RPC
-  try {
-    const isValidUUID = anonUserId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(anonUserId);
-    await supabase.rpc("record_share_event", {
-      p_anon_user_id: isValidUUID ? anonUserId : null,
-    });
-  } catch (rpcErr) {
-    console.error("Failed to record share event stats RPC:", rpcErr);
+  // Atomically record lifetime share & uploader stats using RPC with table fallback
+  const isValidUUID = Boolean(
+    anonUserId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(anonUserId)
+  );
+
+  const { error: rpcError } = await supabase.rpc("record_share_event", {
+    p_anon_user_id: isValidUUID ? anonUserId : null,
+  });
+
+  if (rpcError) {
+    console.error("Supabase RPC record_share_event warning:", rpcError.message || rpcError);
+
+    // Fallback if RPC fails
+    let isNewUser = false;
+    if (isValidUUID) {
+      const { data: insertedUser } = await supabase
+        .from("anonymous_users")
+        .insert({ id: anonUserId })
+        .select("id")
+        .maybeSingle();
+
+      if (insertedUser) {
+        isNewUser = true;
+      }
+    }
+
+    const { data: currentStats } = await supabase
+      .from("app_stats")
+      .select("total_users, total_shares")
+      .eq("id", 1)
+      .maybeSingle();
+
+    const currentUsers = Number(currentStats?.total_users || 0);
+    const currentShares = Number(currentStats?.total_shares || 0);
+
+    const newShares = currentShares + 1;
+    const newUsers = currentUsers + (isNewUser ? 1 : 0);
+
+    const { error: updateError } = await supabase
+      .from("app_stats")
+      .update({
+        total_shares: newShares,
+        total_users: newUsers,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", 1);
+
+    if (updateError) {
+      console.error("Supabase app_stats update error:", updateError.message || updateError);
+    }
   }
 
   return {
@@ -296,12 +338,27 @@ export async function getAppStatsFromStore(): Promise<AppStats> {
 
   const supabase = getSupabaseAdmin();
 
-  // 1. Lifetime users & shares
-  const { data: statsData } = await supabase
+  let { data: statsData, error: statsError } = await supabase
     .from("app_stats")
     .select("total_users, total_shares")
     .eq("id", 1)
-    .single();
+    .maybeSingle();
+
+  if (statsError) {
+    console.error("[store.ts] Error fetching app_stats:", statsError.message || statsError);
+  }
+
+  if (!statsData) {
+    // Self-healing: Ensure singleton row id=1 exists in public.app_stats
+    const { data: upsertData } = await supabase
+      .from("app_stats")
+      .upsert({ id: 1, total_users: 0, total_shares: 0 })
+      .select("total_users, total_shares")
+      .single();
+    if (upsertData) {
+      statsData = upsertData;
+    }
+  }
 
   // 2. Active files stored in non-expired rooms
   const { data: activeRooms } = await supabase

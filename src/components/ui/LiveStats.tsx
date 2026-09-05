@@ -16,7 +16,7 @@ export const LiveStats: React.FC<LiveStatsProps> = ({ refreshTrigger }) => {
     let isMounted = true;
     async function fetchStats() {
       try {
-        const res = await fetch("/api/stats");
+        const res = await fetch("/api/stats", { cache: "no-store" });
         const json = await res.json();
         if (isMounted && json.data) {
           setStats(json.data);

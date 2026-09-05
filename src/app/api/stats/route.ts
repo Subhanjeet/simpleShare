@@ -9,7 +9,15 @@ export async function GET(
 ): Promise<NextResponse<ApiResponse<AppStats>>> {
   try {
     const stats = await getAppStatsFromStore();
-    return NextResponse.json({ data: stats, error: null }, { status: 200 });
+    return NextResponse.json(
+      { data: stats, error: null },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+        },
+      }
+    );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to fetch application statistics";
     return NextResponse.json({ data: null, error: message }, { status: 500 });

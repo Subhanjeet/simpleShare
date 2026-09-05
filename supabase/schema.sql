@@ -122,23 +122,36 @@ ALTER TABLE public.anonymous_users ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow public read app_stats" ON public.app_stats
   FOR SELECT USING (true);
 
+CREATE POLICY "Allow public write app_stats" ON public.app_stats
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Allow public write anonymous_users" ON public.anonymous_users
+  FOR ALL USING (true) WITH CHECK (true);
+
 -- Atomic RPC function to safely record share creation & new uploader count
 CREATE OR REPLACE FUNCTION record_share_event(
-  p_anon_user_id UUID
+  p_anon_user_id UUID DEFAULT NULL
 )
 RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 DECLARE
+  v_rows_inserted INT := 0;
   v_is_new_user BOOLEAN := FALSE;
 BEGIN
+  -- Ensure initial singleton app_stats record exists
+  INSERT INTO public.app_stats (id, total_users, total_shares)
+  VALUES (1, 0, 0)
+  ON CONFLICT (id) DO NOTHING;
+
   IF p_anon_user_id IS NOT NULL THEN
     INSERT INTO public.anonymous_users (id)
     VALUES (p_anon_user_id)
     ON CONFLICT (id) DO NOTHING;
     
-    IF FOUND THEN
+    GET DIAGNOSTICS v_rows_inserted = ROW_COUNT;
+    IF v_rows_inserted > 0 THEN
       v_is_new_user := TRUE;
     END IF;
   END IF;
@@ -151,3 +164,6 @@ BEGIN
   WHERE id = 1;
 END;
 $$;
+
+GRANT EXECUTE ON FUNCTION record_share_event(UUID) TO anon, authenticated, service_role;
+
