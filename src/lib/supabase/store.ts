@@ -12,17 +12,71 @@ import {
   mockGetAppStats,
 } from "./mock-store";
 
+function getSupabaseHostname(url: string): string {
+  if (!url) return "N/A (Missing)";
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname;
+  } catch {
+    return "Invalid URL format";
+  }
+}
+
+export function getSupabaseEnv() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const anonKey =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    "";
+  const serviceKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SECRET_KEY ||
+    "";
+
+  const key = serviceKey || anonKey;
+
+  return {
+    url,
+    anonKey,
+    serviceKey,
+    key,
+  };
+}
+
+export function logSupabaseConfigDiagnostics(): void {
+  const hasUrl = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const hasAnonKey = Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  const hasPublishableKey = Boolean(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
+  const hasSecretKey = Boolean(process.env.SUPABASE_SECRET_KEY);
+  const nodeEnv = process.env.NODE_ENV || "unknown";
+  const hostname = getSupabaseHostname(process.env.NEXT_PUBLIC_SUPABASE_URL || "");
+
+  console.log("[Supabase Config Diagnostic]", {
+    nodeEnv,
+    hasUrl,
+    urlHostname: hostname,
+    hasAnonKey,
+    hasPublishableKey,
+    hasServiceRoleKey,
+    hasSecretKey,
+  });
+}
+
 export function isSupabaseConfigured(): boolean {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  return Boolean(
+  const { url, key } = getSupabaseEnv();
+  const isUrlValid = Boolean(
     url &&
       !url.includes("placeholder") &&
-      !url.includes("xyz-simpleshare-mock") &&
-      key &&
+      !url.includes("xyz-simpleshare-mock")
+  );
+  const isKeyValid = Boolean(
+    key &&
       !key.includes("mock") &&
       !key.includes("placeholder")
   );
+
+  return isUrlValid && isKeyValid;
 }
 
 function assertStoreMode(): "supabase" | "mock" {
@@ -30,9 +84,26 @@ function assertStoreMode(): "supabase" | "mock" {
     return "supabase";
   }
 
+  logSupabaseConfigDiagnostics();
+
   if (process.env.NODE_ENV === "production") {
+    const { url, anonKey, serviceKey } = getSupabaseEnv();
+    const missing: string[] = [];
+
+    if (!url || url.includes("placeholder") || url.includes("xyz-simpleshare-mock")) {
+      missing.push("NEXT_PUBLIC_SUPABASE_URL");
+    }
+
+    if (!anonKey && !serviceKey) {
+      missing.push(
+        "Supabase Key (expected NEXT_PUBLIC_SUPABASE_ANON_KEY, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, SUPABASE_SERVICE_ROLE_KEY, or SUPABASE_SECRET_KEY)"
+      );
+    }
+
     throw new Error(
-      "Database Configuration Error: Missing Supabase credentials in production environment. Shared-memory fallback is strictly disabled in production."
+      `Database Configuration Error: Missing or invalid Supabase environment variables in production [Missing: ${missing.join(
+        ", "
+      )}]. Shared-memory fallback is strictly disabled in production.`
     );
   }
 
