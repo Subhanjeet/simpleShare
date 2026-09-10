@@ -14,7 +14,7 @@ import {
 } from "@/components";
 import { SelectedFileItem, ShareRoom } from "@/types";
 import { getLimitsFromEnv } from "@/lib/validation/room";
-import { getOrCreateAnonymousUserId } from "@/lib/utils/anonymous-user";
+import { getPageInstanceSessionId } from "@/lib/utils/page-session";
 import { Upload, CircleAlert } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -77,7 +77,7 @@ export default function HomePage() {
     setErrorMessage(null);
 
     try {
-      const anonUserId = getOrCreateAnonymousUserId();
+      const sessionId = getPageInstanceSessionId();
 
       const formData = new FormData();
       formData.append("uploaderName", "Subhan");
@@ -85,8 +85,8 @@ export default function HomePage() {
       if (codeOption.codeType === "custom") {
         formData.append("customCode", codeOption.customCode);
       }
-      if (anonUserId) {
-        formData.append("anonUserId", anonUserId);
+      if (sessionId) {
+        formData.append("sessionId", sessionId);
       }
 
       selectedFiles.forEach((item) => {

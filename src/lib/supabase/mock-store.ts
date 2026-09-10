@@ -5,7 +5,7 @@ import { customCodeSchema } from "@/lib/validation/room";
 // Development-only isolated in-memory mock store
 const memoryRooms = new Map<string, ShareRoom>();
 const memoryFiles = new Map<string, { buffer: Buffer; metadata: SharedFile }>();
-const mockAnonymousUsers = new Set<string>();
+const mockPageSessions = new Set<string>();
 let mockSharesCount = 0;
 
 function assertDevOnly() {
@@ -40,7 +40,7 @@ export async function mockCreateRoom(
   uploaderName: string,
   filesData: { originalName: string; mimeType: string; fileSize: number; contentBuffer?: Buffer }[],
   customCode?: string,
-  anonUserId?: string
+  sessionId?: string
 ): Promise<{ room: ShareRoom; files: SharedFile[] }> {
   assertDevOnly();
   let code = customCode ? customCode.trim().toLowerCase() : generateRoomCode();
@@ -97,10 +97,10 @@ export async function mockCreateRoom(
 
   memoryRooms.set(code.toLowerCase(), room);
 
-  // Record mock stats
+  // Record mock stats ONLY after room creation successfully completes
   mockSharesCount++;
-  if (anonUserId) {
-    mockAnonymousUsers.add(anonUserId);
+  if (sessionId) {
+    mockPageSessions.add(sessionId);
   }
 
   return { room, files: createdFiles };
@@ -235,7 +235,7 @@ export async function mockGetAppStats(): Promise<AppStats> {
 
   // Populate realistic baseline demo stats if lower than benchmark values (10 users, 49 shares, 35 files)
   const totalSharesCount = Math.max(49, mockSharesCount, activeSharesList.length);
-  const totalUsersCount = Math.max(10, mockAnonymousUsers.size, uploaderMap.size);
+  const totalUsersCount = Math.max(10, mockPageSessions.size, uploaderMap.size);
   const targetFilesCount = Math.max(35, activeFilesList.length);
 
   // Fill activeSharesList up to totalSharesCount if needed

@@ -145,11 +145,11 @@ export async function createRoomInStore(
   uploaderName: string,
   filesData: { originalName: string; mimeType: string; fileSize: number; contentBuffer?: Buffer }[],
   customCode?: string,
-  anonUserId?: string
+  sessionId?: string
 ): Promise<{ room: ShareRoom; files: SharedFile[] }> {
   const mode = assertStoreMode();
   if (mode === "mock") {
-    return mockCreateRoom(uploaderName, filesData, customCode, anonUserId);
+    return mockCreateRoom(uploaderName, filesData, customCode, sessionId);
   }
 
   let code = customCode ? customCode.trim().toLowerCase() : generateRoomCode();
@@ -233,29 +233,27 @@ export async function createRoomInStore(
     }
   }
 
-  // Atomically record lifetime share & uploader stats using RPC with table fallback
-  const isValidUUID = Boolean(
-    anonUserId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(anonUserId)
-  );
+  // Atomically record lifetime share & user session stats using RPC with table fallback
+  const cleanSessionId = sessionId && sessionId.trim() ? sessionId.trim() : null;
 
   const { error: rpcError } = await supabase.rpc("record_share_event", {
-    p_anon_user_id: isValidUUID ? anonUserId : null,
+    p_session_id: cleanSessionId,
   });
 
   if (rpcError) {
     console.error("Supabase RPC record_share_event warning:", rpcError.message || rpcError);
 
-    // Fallback if RPC fails
-    let isNewUser = false;
-    if (isValidUUID) {
-      const { data: insertedUser } = await supabase
-        .from("anonymous_users")
-        .insert({ id: anonUserId })
+    // Fallback if RPC fails or table is unmigrated
+    let isNewSession = false;
+    if (cleanSessionId) {
+      const { data: insertedSession } = await supabase
+        .from("page_sessions")
+        .insert({ id: cleanSessionId })
         .select("id")
         .maybeSingle();
 
-      if (insertedUser) {
-        isNewUser = true;
+      if (insertedSession) {
+        isNewSession = true;
       }
     }
 
@@ -269,7 +267,7 @@ export async function createRoomInStore(
     const currentShares = Number(currentStats?.total_shares || 0);
 
     const newShares = currentShares + 1;
-    const newUsers = currentUsers + (isNewUser ? 1 : 0);
+    const newUsers = currentUsers + (isNewSession ? 1 : 0);
 
     const { error: updateError } = await supabase
       .from("app_stats")
