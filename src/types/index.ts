@@ -46,11 +46,30 @@ export interface ActiveFileItem {
   expiresAt: string;
 }
 
+export interface ActiveShareItem {
+  id: string;
+  roomCode: string;
+  uploaderName: string;
+  filesCount: number;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface UserStatItem {
+  id: string;
+  uploaderName: string;
+  totalRooms: number;
+  totalFiles: number;
+  lastActive: string;
+}
+
 export interface AppStats {
   users: number;
   shares: number;
   files: number;
   activeFiles: ActiveFileItem[];
+  activeShares: ActiveShareItem[];
+  recentUsers: UserStatItem[];
 }
 
 

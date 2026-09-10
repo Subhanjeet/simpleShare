@@ -1,4 +1,4 @@
-import { ShareRoom, SharedFile, ActiveFileItem, AppStats } from "@/types";
+import { ShareRoom, SharedFile, ActiveFileItem, ActiveShareItem, UserStatItem, AppStats } from "@/types";
 import { generateRoomCode } from "@/lib/utils/format";
 import { customCodeSchema } from "@/lib/validation/room";
 
@@ -182,28 +182,72 @@ export async function mockPurgeAllExpiredRooms(): Promise<{ deletedRoomsCount: n
 export async function mockGetAppStats(): Promise<AppStats> {
   assertDevOnly();
   const activeFilesList: ActiveFileItem[] = [];
+  const activeSharesList: ActiveShareItem[] = [];
+  const uploaderMap = new Map<string, { rooms: number; files: number; lastActive: string }>();
   const now = Date.now();
 
   for (const [, room] of Array.from(memoryRooms.entries())) {
-    if (new Date(room.expires_at).getTime() > now && room.status === "active") {
+    const isRoomActive = new Date(room.expires_at).getTime() > now && room.status === "active";
+    const filesCount = room.files?.length || 0;
+
+    if (isRoomActive) {
+      activeSharesList.push({
+        id: room.id,
+        roomCode: "",
+        uploaderName: room.uploader_name || "Subhan",
+        filesCount,
+        expiresAt: room.expires_at,
+        createdAt: room.created_at,
+      });
+
       if (room.files) {
         for (const f of room.files) {
           activeFilesList.push({
             id: f.id,
             name: f.original_name,
             size: f.file_size,
-            roomCode: room.room_code,
+            roomCode: "",
             expiresAt: room.expires_at,
           });
         }
       }
     }
+
+    const uploader = room.uploader_name || "Subhan";
+    const prev = uploaderMap.get(uploader) || { rooms: 0, files: 0, lastActive: room.created_at };
+    uploaderMap.set(uploader, {
+      rooms: prev.rooms + 1,
+      files: prev.files + filesCount,
+      lastActive: new Date(room.created_at) > new Date(prev.lastActive) ? room.created_at : prev.lastActive,
+    });
   }
 
+  const recentUsersList: UserStatItem[] = Array.from(uploaderMap.entries()).map(([uploaderName, stats], idx) => ({
+    id: `user-${idx + 1}`,
+    uploaderName,
+    totalRooms: stats.rooms,
+    totalFiles: stats.files,
+    lastActive: stats.lastActive,
+  }));
+
+  if (recentUsersList.length === 0) {
+    recentUsersList.push({
+      id: "user-default",
+      uploaderName: "Subhan",
+      totalRooms: mockSharesCount,
+      totalFiles: activeFilesList.length,
+      lastActive: new Date().toISOString(),
+    });
+  }
+
+  const totalUsersCount = Math.max(mockAnonymousUsers.size, recentUsersList.length);
+
   return {
-    users: mockAnonymousUsers.size,
-    shares: mockSharesCount,
+    users: totalUsersCount,
+    shares: mockSharesCount || activeSharesList.length,
     files: activeFilesList.length,
     activeFiles: activeFilesList,
+    activeShares: activeSharesList,
+    recentUsers: recentUsersList,
   };
 }

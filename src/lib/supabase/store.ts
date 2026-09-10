@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from "./server";
-import { ShareRoom, SharedFile, ActiveFileItem, AppStats } from "@/types";
+import { ShareRoom, SharedFile, ActiveFileItem, ActiveShareItem, UserStatItem, AppStats } from "@/types";
 import { generateRoomCode } from "@/lib/utils/format";
 import { customCodeSchema } from "@/lib/validation/room";
 import {
@@ -431,15 +431,18 @@ export async function getAppStatsFromStore(): Promise<AppStats> {
     }
   }
 
-  // 2. Active files stored in non-expired rooms
+  // 2. Active rooms stored in share_rooms
   const { data: activeRooms } = await supabase
     .from("share_rooms")
-    .select("id, room_code, expires_at")
+    .select("id, room_code, uploader_name, created_at, expires_at")
     .gt("expires_at", new Date().toISOString())
-    .eq("status", "active");
+    .eq("status", "active")
+    .order("created_at", { ascending: false });
 
   let activeFilesCount = 0;
   const activeFilesList: ActiveFileItem[] = [];
+  const activeSharesList: ActiveShareItem[] = [];
+  const uploaderMap = new Map<string, { rooms: number; files: number; lastActive: string }>();
 
   if (activeRooms && activeRooms.length > 0) {
     const roomMap = new Map(activeRooms.map((r) => [r.id, r]));
@@ -453,24 +456,70 @@ export async function getAppStatsFromStore(): Promise<AppStats> {
 
     activeFilesCount = count || 0;
 
+    const filesPerRoom = new Map<string, number>();
     if (filesData) {
       for (const f of filesData) {
+        filesPerRoom.set(f.room_id, (filesPerRoom.get(f.room_id) || 0) + 1);
+
         const rm = roomMap.get(f.room_id);
         activeFilesList.push({
           id: f.id,
           name: f.original_name,
           size: f.file_size,
-          roomCode: rm?.room_code || "",
+          roomCode: "",
           expiresAt: rm?.expires_at || "",
         });
       }
     }
+
+    for (const r of activeRooms) {
+      const roomFilesCount = filesPerRoom.get(r.id) || 0;
+      activeSharesList.push({
+        id: r.id,
+        roomCode: "",
+        uploaderName: r.uploader_name || "Subhan",
+        filesCount: roomFilesCount,
+        expiresAt: r.expires_at,
+        createdAt: r.created_at,
+      });
+
+      const uploader = r.uploader_name || "Subhan";
+      const prev = uploaderMap.get(uploader) || { rooms: 0, files: 0, lastActive: r.created_at };
+      uploaderMap.set(uploader, {
+        rooms: prev.rooms + 1,
+        files: prev.files + roomFilesCount,
+        lastActive: new Date(r.created_at) > new Date(prev.lastActive) ? r.created_at : prev.lastActive,
+      });
+    }
   }
 
+  const recentUsersList: UserStatItem[] = Array.from(uploaderMap.entries()).map(([uploaderName, stats], idx) => ({
+    id: `user-${idx + 1}`,
+    uploaderName,
+    totalRooms: stats.rooms,
+    totalFiles: stats.files,
+    lastActive: stats.lastActive,
+  }));
+
+  if (recentUsersList.length === 0) {
+    recentUsersList.push({
+      id: "user-default",
+      uploaderName: "Subhan",
+      totalRooms: Number(statsData?.total_shares || 0),
+      totalFiles: activeFilesCount,
+      lastActive: new Date().toISOString(),
+    });
+  }
+
+  const totalUsers = Math.max(Number(statsData?.total_users || 0), recentUsersList.length);
+  const totalShares = Math.max(Number(statsData?.total_shares || 0), activeSharesList.length);
+
   return {
-    users: Number(statsData?.total_users || 0),
-    shares: Number(statsData?.total_shares || 0),
+    users: totalUsers,
+    shares: totalShares,
     files: activeFilesCount,
     activeFiles: activeFilesList,
+    activeShares: activeSharesList,
+    recentUsers: recentUsersList,
   };
 }
