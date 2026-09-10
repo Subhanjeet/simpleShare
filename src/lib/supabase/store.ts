@@ -431,48 +431,59 @@ export async function getAppStatsFromStore(): Promise<AppStats> {
     }
   }
 
-  // 2. Active rooms stored in share_rooms
-  const { data: activeRooms } = await supabase
+  // 2. Fetch all rooms stored in share_rooms for lifetime stats and active files
+  const { data: allRooms } = await supabase
     .from("share_rooms")
-    .select("id, room_code, uploader_name, created_at, expires_at")
-    .gt("expires_at", new Date().toISOString())
-    .eq("status", "active")
-    .order("created_at", { ascending: false });
+    .select("id, room_code, uploader_name, created_at, expires_at, status")
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  const nowISO = new Date().toISOString();
+  const activeRooms = (allRooms || []).filter(
+    (r) => new Date(r.expires_at).getTime() > Date.now() && r.status === "active"
+  );
 
   let activeFilesCount = 0;
   const activeFilesList: ActiveFileItem[] = [];
   const activeSharesList: ActiveShareItem[] = [];
   const uploaderMap = new Map<string, { rooms: number; files: number; lastActive: string }>();
 
-  if (activeRooms && activeRooms.length > 0) {
-    const roomMap = new Map(activeRooms.map((r) => [r.id, r]));
-    const roomIds = activeRooms.map((r) => r.id);
+  // Fetch files count per room
+  const roomIds = (allRooms || []).map((r) => r.id);
+  const filesPerRoom = new Map<string, number>();
 
-    const { data: filesData, count } = await supabase
+  if (roomIds.length > 0) {
+    const { data: filesData } = await supabase
       .from("shared_files")
-      .select("id, room_id, original_name, file_size", { count: "exact" })
+      .select("id, room_id, original_name, file_size, created_at")
       .in("room_id", roomIds)
       .order("created_at", { ascending: false });
 
-    activeFilesCount = count || 0;
-
-    const filesPerRoom = new Map<string, number>();
     if (filesData) {
+      const activeRoomIds = new Set(activeRooms.map((r) => r.id));
+      const roomMap = new Map((allRooms || []).map((r) => [r.id, r]));
+
       for (const f of filesData) {
         filesPerRoom.set(f.room_id, (filesPerRoom.get(f.room_id) || 0) + 1);
 
-        const rm = roomMap.get(f.room_id);
-        activeFilesList.push({
-          id: f.id,
-          name: f.original_name,
-          size: f.file_size,
-          roomCode: "",
-          expiresAt: rm?.expires_at || "",
-        });
+        if (activeRoomIds.has(f.room_id)) {
+          const rm = roomMap.get(f.room_id);
+          activeFilesList.push({
+            id: f.id,
+            name: f.original_name,
+            size: f.file_size,
+            roomCode: "",
+            expiresAt: rm?.expires_at || "",
+          });
+        }
       }
+      activeFilesCount = activeFilesList.length;
     }
+  }
 
-    for (const r of activeRooms) {
+  // Build activeSharesList and uploaderMap from allRooms
+  if (allRooms && allRooms.length > 0) {
+    for (const r of allRooms) {
       const roomFilesCount = filesPerRoom.get(r.id) || 0;
       activeSharesList.push({
         id: r.id,

@@ -38,14 +38,14 @@ export const LiveStats: React.FC<LiveStatsProps> = ({ refreshTrigger }) => {
 
   const getListHeader = () => {
     if (activeTab === "users") {
-      const count = stats?.recentUsers?.length || 0;
-      return { title: "Uploaders", count };
+      const count = stats?.recentUsers?.length || stats?.users || 0;
+      return { title: "Lifetime Uploaders", count };
     }
     if (activeTab === "shares") {
-      const count = stats?.activeShares?.length || 0;
-      return { title: "Active Rooms", count };
+      const count = stats?.activeShares?.length || stats?.shares || 0;
+      return { title: "Lifetime Rooms", count };
     }
-    const count = stats?.activeFiles?.length || 0;
+    const count = stats?.activeFiles?.length || stats?.files || 0;
     return { title: "Active Files", count };
   };
 

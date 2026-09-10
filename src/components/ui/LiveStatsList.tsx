@@ -90,7 +90,7 @@ export const LiveStatsList: React.FC<LiveStatsListProps> = ({ activeTab, stats, 
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-slate-200 truncate">
-                  Active Share Room
+                  Share Room #{sharesList.length - idx}
                 </p>
                 <p className="text-[10px] text-slate-500 font-mono truncate">
                   By {share.uploaderName} • {share.filesCount} file{share.filesCount === 1 ? "" : "s"}
