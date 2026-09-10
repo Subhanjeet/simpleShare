@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from "./server";
-import { ShareRoom, SharedFile, ActiveFileItem, ActiveShareItem, UserStatItem, AppStats } from "@/types";
+import { ShareRoom, SharedFile } from "@/types";
 import { generateRoomCode } from "@/lib/utils/format";
 import { customCodeSchema } from "@/lib/validation/room";
 import {
@@ -9,20 +9,7 @@ import {
   mockGetFileContent,
   mockDeleteExpiredRoom,
   mockPurgeAllExpiredRooms,
-  mockGetAppStats,
 } from "./mock-store";
-
-const fallbackPageSessions = new Set<string>();
-
-function getSupabaseHostname(url: string): string {
-  if (!url) return "N/A (Missing)";
-  try {
-    const parsed = new URL(url);
-    return parsed.hostname;
-  } catch {
-    return "Invalid URL format";
-  }
-}
 
 export function getSupabaseEnv() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -45,26 +32,6 @@ export function getSupabaseEnv() {
   };
 }
 
-export function logSupabaseConfigDiagnostics(): void {
-  const hasUrl = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
-  const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const hasAnonKey = Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
-  const hasPublishableKey = Boolean(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
-  const hasSecretKey = Boolean(process.env.SUPABASE_SECRET_KEY);
-  const nodeEnv = process.env.NODE_ENV || "unknown";
-  const hostname = getSupabaseHostname(process.env.NEXT_PUBLIC_SUPABASE_URL || "");
-
-  console.log("[Supabase Config Diagnostic]", {
-    nodeEnv,
-    hasUrl,
-    urlHostname: hostname,
-    hasAnonKey,
-    hasPublishableKey,
-    hasServiceRoleKey,
-    hasSecretKey,
-  });
-}
-
 export function isSupabaseConfigured(): boolean {
   const { url, key } = getSupabaseEnv();
   const isUrlValid = Boolean(
@@ -85,8 +52,6 @@ function assertStoreMode(): "supabase" | "mock" {
   if (isSupabaseConfigured()) {
     return "supabase";
   }
-
-  logSupabaseConfigDiagnostics();
 
   if (process.env.NODE_ENV === "production") {
     const { url, anonKey, serviceKey } = getSupabaseEnv();
@@ -146,12 +111,11 @@ export async function isCodeAvailable(rawCode: string): Promise<{ available: boo
 export async function createRoomInStore(
   uploaderName: string,
   filesData: { originalName: string; mimeType: string; fileSize: number; contentBuffer?: Buffer }[],
-  customCode?: string,
-  sessionId?: string
+  customCode?: string
 ): Promise<{ room: ShareRoom; files: SharedFile[] }> {
   const mode = assertStoreMode();
   if (mode === "mock") {
-    return mockCreateRoom(uploaderName, filesData, customCode, sessionId);
+    return mockCreateRoom(uploaderName, filesData, customCode);
   }
 
   let code = customCode ? customCode.trim().toLowerCase() : generateRoomCode();
@@ -182,7 +146,7 @@ export async function createRoomInStore(
       created_at: createdAt,
       expires_at: expiresAt,
       status: "active",
-      uploader_name: uploaderName || "Subhan",
+      uploader_name: uploaderName || "A friend",
     })
     .select()
     .single();
@@ -232,58 +196,6 @@ export async function createRoomInStore(
         ...fileData,
         download_url: `/api/rooms/${code}/download/${fileData.id}`,
       });
-    }
-  }
-
-  // Atomically record lifetime share & user session stats using RPC with table/memory fallback
-  const activeSessionId = sessionId && sessionId.trim() ? sessionId.trim() : `sess-${crypto.randomUUID()}`;
-
-  const { error: rpcError } = await supabase.rpc("record_share_event", {
-    p_session_id: activeSessionId,
-  });
-
-  if (rpcError) {
-    console.error("Supabase RPC record_share_event warning:", rpcError.message || rpcError);
-
-    // Fallback if RPC fails or table is unmigrated
-    let isNewSession = false;
-    const { data: insertedSession, error: insertErr } = await supabase
-      .from("page_sessions")
-      .insert({ id: activeSessionId })
-      .select("id")
-      .maybeSingle();
-
-    if (!insertErr && insertedSession) {
-      isNewSession = true;
-    } else if (!fallbackPageSessions.has(activeSessionId)) {
-      // Robust memory fallback if page_sessions DB table is not migrated yet
-      fallbackPageSessions.add(activeSessionId);
-      isNewSession = true;
-    }
-
-    const { data: currentStats } = await supabase
-      .from("app_stats")
-      .select("total_users, total_shares")
-      .eq("id", 1)
-      .maybeSingle();
-
-    const currentUsers = Number(currentStats?.total_users || 0);
-    const currentShares = Number(currentStats?.total_shares || 0);
-
-    const newShares = currentShares + 1;
-    const newUsers = currentUsers + (isNewSession ? 1 : 0);
-
-    const { error: updateError } = await supabase
-      .from("app_stats")
-      .update({
-        total_shares: newShares,
-        total_users: newUsers,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
-
-    if (updateError) {
-      console.error("Supabase app_stats update error:", updateError.message || updateError);
     }
   }
 
@@ -399,147 +311,4 @@ export async function purgeAllExpiredRooms(): Promise<{ deletedRoomsCount: numbe
   }
 
   return { deletedRoomsCount: count };
-}
-
-
-
-export async function getAppStatsFromStore(): Promise<AppStats> {
-  const mode = assertStoreMode();
-  console.log(`[getAppStatsFromStore] Store Mode: ${mode}`);
-
-  if (mode === "mock") {
-    const mockRes = await mockGetAppStats();
-    console.log("[getAppStatsFromStore] Mock stats output:", mockRes);
-    return mockRes;
-  }
-
-  const { url } = getSupabaseEnv();
-  console.log(`[getAppStatsFromStore] Supabase Hostname: ${getSupabaseHostname(url)}`);
-
-  const supabase = getSupabaseAdmin();
-
-  let { data: statsData, error: statsError } = await supabase
-    .from("app_stats")
-    .select("total_users, total_shares")
-    .eq("id", 1)
-    .maybeSingle();
-
-  if (statsError) {
-    console.error("[getAppStatsFromStore] Error fetching app_stats:", statsError.message || statsError);
-  }
-
-  if (!statsData) {
-    // Self-healing: Ensure singleton row id=1 exists in public.app_stats
-    const { data: upsertData } = await supabase
-      .from("app_stats")
-      .upsert({ id: 1, total_users: 0, total_shares: 0 })
-      .select("total_users, total_shares")
-      .single();
-    if (upsertData) {
-      statsData = upsertData;
-    }
-  }
-
-  const dbUsers = Number(statsData?.total_users || 0);
-  const dbShares = Number(statsData?.total_shares || 0);
-
-  // 2. Fetch all rooms stored in share_rooms for lifetime stats and active files
-  const { data: allRooms } = await supabase
-    .from("share_rooms")
-    .select("id, room_code, uploader_name, created_at, expires_at, status")
-    .order("created_at", { ascending: false })
-    .limit(100);
-
-  const activeRooms = (allRooms || []).filter(
-    (r) => new Date(r.expires_at).getTime() > Date.now() && r.status === "active"
-  );
-
-  let activeFilesCount = 0;
-  const activeFilesList: ActiveFileItem[] = [];
-  const activeSharesList: ActiveShareItem[] = [];
-  const uploaderMap = new Map<string, { rooms: number; files: number; lastActive: string }>();
-
-  // Fetch files count per room
-  const roomIds = (allRooms || []).map((r) => r.id);
-  const filesPerRoom = new Map<string, number>();
-
-  if (roomIds.length > 0) {
-    const { data: filesData } = await supabase
-      .from("shared_files")
-      .select("id, room_id, original_name, file_size, created_at")
-      .in("room_id", roomIds)
-      .order("created_at", { ascending: false });
-
-    if (filesData) {
-      const activeRoomIds = new Set(activeRooms.map((r) => r.id));
-      const roomMap = new Map((allRooms || []).map((r) => [r.id, r]));
-
-      for (const f of filesData) {
-        filesPerRoom.set(f.room_id, (filesPerRoom.get(f.room_id) || 0) + 1);
-
-        if (activeRoomIds.has(f.room_id)) {
-          const rm = roomMap.get(f.room_id);
-          activeFilesList.push({
-            id: f.id,
-            name: f.original_name,
-            size: f.file_size,
-            roomCode: "",
-            expiresAt: rm?.expires_at || "",
-          });
-        }
-      }
-      activeFilesCount = activeFilesList.length;
-    }
-  }
-
-  // Build activeSharesList and uploaderMap from allRooms
-  if (allRooms && allRooms.length > 0) {
-    for (const r of allRooms) {
-      const roomFilesCount = filesPerRoom.get(r.id) || 0;
-      activeSharesList.push({
-        id: r.id,
-        roomCode: "",
-        uploaderName: r.uploader_name || "Subhan",
-        filesCount: roomFilesCount,
-        expiresAt: r.expires_at,
-        createdAt: r.created_at,
-      });
-
-      const uploader = r.uploader_name || "Subhan";
-      const prev = uploaderMap.get(uploader) || { rooms: 0, files: 0, lastActive: r.created_at };
-      uploaderMap.set(uploader, {
-        rooms: prev.rooms + 1,
-        files: prev.files + roomFilesCount,
-        lastActive: new Date(r.created_at) > new Date(prev.lastActive) ? r.created_at : prev.lastActive,
-      });
-    }
-  }
-
-  const recentUsersList: UserStatItem[] = Array.from(uploaderMap.entries()).map(([uploaderName, stats], idx) => ({
-    id: `uploader-${idx + 1}`,
-    uploaderName,
-    totalRooms: stats.rooms,
-    totalFiles: stats.files,
-    lastActive: stats.lastActive,
-  }));
-
-  const payload: AppStats = {
-    users: dbUsers,
-    shares: dbShares,
-    files: activeFilesCount,
-    activeFiles: activeFilesList,
-    activeShares: activeSharesList,
-    recentUsers: recentUsersList,
-  };
-
-  console.log("[getAppStatsFromStore] Final DB Payload:", {
-    users: payload.users,
-    shares: payload.shares,
-    files: payload.files,
-    activeFilesCount: payload.activeFiles.length,
-    activeSharesCount: payload.activeShares.length,
-    recentUsersCount: payload.recentUsers.length,
-  });
-
-  return payload;
 }

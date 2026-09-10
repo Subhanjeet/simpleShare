@@ -1,12 +1,10 @@
-import { ShareRoom, SharedFile, ActiveFileItem, ActiveShareItem, UserStatItem, AppStats } from "@/types";
+import { ShareRoom, SharedFile } from "@/types";
 import { generateRoomCode } from "@/lib/utils/format";
 import { customCodeSchema } from "@/lib/validation/room";
 
 // Development-only isolated in-memory mock store
 const memoryRooms = new Map<string, ShareRoom>();
 const memoryFiles = new Map<string, { buffer: Buffer; metadata: SharedFile }>();
-const mockPageSessions = new Set<string>();
-let mockSharesCount = 0;
 
 function assertDevOnly() {
   if (process.env.NODE_ENV === "production") {
@@ -39,8 +37,7 @@ export async function mockIsCodeAvailable(rawCode: string): Promise<{ available:
 export async function mockCreateRoom(
   uploaderName: string,
   filesData: { originalName: string; mimeType: string; fileSize: number; contentBuffer?: Buffer }[],
-  customCode?: string,
-  sessionId?: string
+  customCode?: string
 ): Promise<{ room: ShareRoom; files: SharedFile[] }> {
   assertDevOnly();
   let code = customCode ? customCode.trim().toLowerCase() : generateRoomCode();
@@ -91,17 +88,11 @@ export async function mockCreateRoom(
     created_at: createdAt,
     expires_at: expiresAt,
     status: "active",
-    uploader_name: uploaderName || "Subhan",
+    uploader_name: uploaderName || "A friend",
     files: createdFiles,
   };
 
   memoryRooms.set(code.toLowerCase(), room);
-
-  // Record mock stats ONLY after room creation successfully completes
-  mockSharesCount++;
-  if (sessionId) {
-    mockPageSessions.add(sessionId);
-  }
 
   return { room, files: createdFiles };
 }
@@ -177,66 +168,4 @@ export async function mockPurgeAllExpiredRooms(): Promise<{ deletedRoomsCount: n
     }
   }
   return { deletedRoomsCount: count };
-}
-
-export async function mockGetAppStats(): Promise<AppStats> {
-  assertDevOnly();
-  const activeFilesList: ActiveFileItem[] = [];
-  const activeSharesList: ActiveShareItem[] = [];
-  const uploaderMap = new Map<string, { rooms: number; files: number; lastActive: string }>();
-  const now = Date.now();
-
-  for (const [, room] of Array.from(memoryRooms.entries())) {
-    const isRoomActive = new Date(room.expires_at).getTime() > now && room.status === "active";
-    const filesCount = room.files?.length || 0;
-
-    activeSharesList.push({
-      id: room.id,
-      roomCode: "",
-      uploaderName: room.uploader_name || "Subhan",
-      filesCount,
-      expiresAt: room.expires_at,
-      createdAt: room.created_at,
-    });
-
-    if (isRoomActive && room.files) {
-      for (const f of room.files) {
-        activeFilesList.push({
-          id: f.id,
-          name: f.original_name,
-          size: f.file_size,
-          roomCode: "",
-          expiresAt: room.expires_at,
-        });
-      }
-    }
-
-    const uploader = room.uploader_name || "Subhan";
-    const prev = uploaderMap.get(uploader) || { rooms: 0, files: 0, lastActive: room.created_at };
-    uploaderMap.set(uploader, {
-      rooms: prev.rooms + 1,
-      files: prev.files + filesCount,
-      lastActive: new Date(room.created_at) > new Date(prev.lastActive) ? room.created_at : prev.lastActive,
-    });
-  }
-
-  const recentUsersList: UserStatItem[] = Array.from(uploaderMap.entries()).map(([uploaderName, stats], idx) => ({
-    id: `uploader-${idx + 1}`,
-    uploaderName,
-    totalRooms: stats.rooms,
-    totalFiles: stats.files,
-    lastActive: stats.lastActive,
-  }));
-
-  const totalSharesCount = mockSharesCount;
-  const totalUsersCount = mockPageSessions.size;
-
-  return {
-    users: totalUsersCount,
-    shares: totalSharesCount,
-    files: activeFilesList.length,
-    activeFiles: activeFilesList,
-    activeShares: activeSharesList,
-    recentUsers: recentUsersList,
-  };
 }

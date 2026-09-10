@@ -8,10 +8,9 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<{ room: ShareRoom }>>> {
   try {
     const formData = await req.formData();
-    const uploaderName = (formData.get("uploaderName") as string) || "Subhan";
+    const uploaderName = (formData.get("uploaderName") as string) || "A friend";
     const codeType = (formData.get("codeType") as string) || "generated";
     const rawCustomCode = (formData.get("customCode") as string) || "";
-    const sessionId = (formData.get("sessionId") as string) || "";
     const files = formData.getAll("files") as File[];
 
     if (!files || files.length === 0) {
@@ -80,7 +79,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<{
       return NextResponse.json({ data: null, error: validation.error.errors[0]?.message || "Invalid upload parameters" }, { status: 400 });
     }
 
-    const { room } = await createRoomInStore(uploaderName, fileItemsData, customCodeToUse, sessionId);
+    const { room } = await createRoomInStore(uploaderName, fileItemsData, customCodeToUse);
 
     return NextResponse.json({ data: { room }, error: null }, { status: 201 });
   } catch (err: unknown) {

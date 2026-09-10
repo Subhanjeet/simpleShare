@@ -86,7 +86,6 @@ BEGIN
   JOIN public.share_rooms sr ON sf.room_id = sr.id
   WHERE sr.expires_at <= NOW() OR sr.status = 'expired';
 
-  -- Note: Files in storage bucket are cleaned via Supabase service role / API cleanup route or pg_cron
   -- Delete expired share_rooms (cascades to shared_files table records)
   WITH deleted AS (
     DELETE FROM public.share_rooms
@@ -98,72 +97,3 @@ BEGIN
   RETURN QUERY SELECT v_deleted_rooms_count, v_deleted_files_count;
 END;
 $$;
-
--- 6. Live Statistics Setup (Lifetime Users, Shares & Active Files)
-CREATE TABLE IF NOT EXISTS public.app_stats (
-  id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-  total_users BIGINT NOT NULL DEFAULT 0,
-  total_shares BIGINT NOT NULL DEFAULT 0,
-  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
-);
-
-INSERT INTO public.app_stats (id, total_users, total_shares)
-VALUES (1, 0, 0)
-ON CONFLICT (id) DO NOTHING;
-
-CREATE TABLE IF NOT EXISTS public.anonymous_users (
-  id UUID PRIMARY KEY,
-  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
-);
-
-ALTER TABLE public.app_stats ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.anonymous_users ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Allow public read app_stats" ON public.app_stats
-  FOR SELECT USING (true);
-
-CREATE POLICY "Allow public write app_stats" ON public.app_stats
-  FOR ALL USING (true) WITH CHECK (true);
-
-CREATE POLICY "Allow public write anonymous_users" ON public.anonymous_users
-  FOR ALL USING (true) WITH CHECK (true);
-
--- Atomic RPC function to safely record share creation & new uploader count
-CREATE OR REPLACE FUNCTION record_share_event(
-  p_anon_user_id UUID DEFAULT NULL
-)
-RETURNS VOID
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-  v_rows_inserted INT := 0;
-  v_is_new_user BOOLEAN := FALSE;
-BEGIN
-  -- Ensure initial singleton app_stats record exists
-  INSERT INTO public.app_stats (id, total_users, total_shares)
-  VALUES (1, 0, 0)
-  ON CONFLICT (id) DO NOTHING;
-
-  IF p_anon_user_id IS NOT NULL THEN
-    INSERT INTO public.anonymous_users (id)
-    VALUES (p_anon_user_id)
-    ON CONFLICT (id) DO NOTHING;
-    
-    GET DIAGNOSTICS v_rows_inserted = ROW_COUNT;
-    IF v_rows_inserted > 0 THEN
-      v_is_new_user := TRUE;
-    END IF;
-  END IF;
-
-  UPDATE public.app_stats
-  SET 
-    total_shares = total_shares + 1,
-    total_users = total_users + (CASE WHEN v_is_new_user THEN 1 ELSE 0 END),
-    updated_at = NOW()
-  WHERE id = 1;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION record_share_event(UUID) TO anon, authenticated, service_role;
-

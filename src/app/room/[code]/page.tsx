@@ -83,7 +83,9 @@ export default function RoomPage() {
               Files shared with you
             </span>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              {room.uploader_name} shared {fileCount} {fileCount === 1 ? "file" : "files"}
+              {room.uploader_name && room.uploader_name !== "Subhan" && room.uploader_name !== "A friend"
+                ? `${room.uploader_name} shared ${fileCount} ${fileCount === 1 ? "file" : "files"}`
+                : `${fileCount} ${fileCount === 1 ? "file" : "files"} shared with you`}
             </h1>
           </div>
 
