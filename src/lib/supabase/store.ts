@@ -405,9 +405,16 @@ export async function purgeAllExpiredRooms(): Promise<{ deletedRoomsCount: numbe
 
 export async function getAppStatsFromStore(): Promise<AppStats> {
   const mode = assertStoreMode();
+  console.log(`[getAppStatsFromStore] Store Mode: ${mode}`);
+
   if (mode === "mock") {
-    return mockGetAppStats();
+    const mockRes = await mockGetAppStats();
+    console.log("[getAppStatsFromStore] Mock stats output:", mockRes);
+    return mockRes;
   }
+
+  const { url } = getSupabaseEnv();
+  console.log(`[getAppStatsFromStore] Supabase Hostname: ${getSupabaseHostname(url)}`);
 
   const supabase = getSupabaseAdmin();
 
@@ -418,7 +425,7 @@ export async function getAppStatsFromStore(): Promise<AppStats> {
     .maybeSingle();
 
   if (statsError) {
-    console.error("[store.ts] Error fetching app_stats:", statsError.message || statsError);
+    console.error("[getAppStatsFromStore] Error fetching app_stats:", statsError.message || statsError);
   }
 
   if (!statsData) {
@@ -433,6 +440,9 @@ export async function getAppStatsFromStore(): Promise<AppStats> {
     }
   }
 
+  const dbUsers = Number(statsData?.total_users || 0);
+  const dbShares = Number(statsData?.total_shares || 0);
+
   // 2. Fetch all rooms stored in share_rooms for lifetime stats and active files
   const { data: allRooms } = await supabase
     .from("share_rooms")
@@ -440,7 +450,6 @@ export async function getAppStatsFromStore(): Promise<AppStats> {
     .order("created_at", { ascending: false })
     .limit(100);
 
-  const nowISO = new Date().toISOString();
   const activeRooms = (allRooms || []).filter(
     (r) => new Date(r.expires_at).getTime() > Date.now() && r.status === "active"
   );
@@ -514,25 +523,23 @@ export async function getAppStatsFromStore(): Promise<AppStats> {
     lastActive: stats.lastActive,
   }));
 
-  if (recentUsersList.length === 0) {
-    recentUsersList.push({
-      id: "user-default",
-      uploaderName: "Subhan",
-      totalRooms: Number(statsData?.total_shares || 0),
-      totalFiles: activeFilesCount,
-      lastActive: new Date().toISOString(),
-    });
-  }
-
-  const totalUsers = Math.max(Number(statsData?.total_users || 0), recentUsersList.length);
-  const totalShares = Math.max(Number(statsData?.total_shares || 0), activeSharesList.length);
-
-  return {
-    users: totalUsers,
-    shares: totalShares,
+  const payload: AppStats = {
+    users: dbUsers,
+    shares: dbShares,
     files: activeFilesCount,
     activeFiles: activeFilesList,
     activeShares: activeSharesList,
     recentUsers: recentUsersList,
   };
+
+  console.log("[getAppStatsFromStore] Final DB Payload:", {
+    users: payload.users,
+    shares: payload.shares,
+    files: payload.files,
+    activeFilesCount: payload.activeFiles.length,
+    activeSharesCount: payload.activeShares.length,
+    recentUsersCount: payload.recentUsers.length,
+  });
+
+  return payload;
 }

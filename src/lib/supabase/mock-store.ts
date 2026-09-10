@@ -179,19 +179,6 @@ export async function mockPurgeAllExpiredRooms(): Promise<{ deletedRoomsCount: n
   return { deletedRoomsCount: count };
 }
 
-const DEMO_UPLOADERS = [
-  "Subhan", "Alex M.", "Sarah K.", "David Chen", "Elena R.", 
-  "Marcus Vance", "Chloe B.", "Liam Wilson", "Ryan Park", "Priya Sharma"
-];
-
-const DEMO_FILE_NAMES = [
-  "869488f011964995c4fd...png", "grp.jpg", "project_blueprint.pdf", "testingfile.zip",
-  "dashboard_preview.png", "quarterly_report.docx", "architecture_v2.svg", "dataset_export.csv",
-  "brand_assets.zip", "presentation_deck.pdf", "design_system.fig", "app_demo.mp4",
-  "client_proposal.pdf", "release_notes.txt", "financial_model.xlsx", "database_backup.sql",
-  "hero_banner.png", "user_research.pdf", "api_schema.json", "icon_set.svg"
-];
-
 export async function mockGetAppStats(): Promise<AppStats> {
   assertDevOnly();
   const activeFilesList: ActiveFileItem[] = [];
@@ -233,54 +220,16 @@ export async function mockGetAppStats(): Promise<AppStats> {
     });
   }
 
+  const recentUsersList: UserStatItem[] = Array.from(uploaderMap.entries()).map(([uploaderName, stats], idx) => ({
+    id: `user-${idx + 1}`,
+    uploaderName,
+    totalRooms: stats.rooms,
+    totalFiles: stats.files,
+    lastActive: stats.lastActive,
+  }));
+
   const totalSharesCount = Math.max(mockSharesCount, activeSharesList.length);
-  const totalUsersCount = Math.max(mockPageSessions.size, uploaderMap.size, 1);
-  const targetFilesCount = activeFilesList.length;
-
-  // Fill activeSharesList up to totalSharesCount if needed
-  while (activeSharesList.length < Math.min(totalSharesCount, 49)) {
-    const idx = activeSharesList.length;
-    const uploaderName = DEMO_UPLOADERS[idx % DEMO_UPLOADERS.length];
-    const pastTime = new Date(now - idx * 3 * 3600 * 1000).toISOString();
-    const expireTime = new Date(now + (7 * 24 - idx * 3) * 3600 * 1000).toISOString();
-
-    activeSharesList.push({
-      id: `share-demo-${idx + 1}`,
-      roomCode: "",
-      uploaderName,
-      filesCount: (idx % 4) + 1,
-      expiresAt: expireTime,
-      createdAt: pastTime,
-    });
-  }
-
-  // Fill activeFilesList up to targetFilesCount if needed
-  while (activeFilesList.length < targetFilesCount) {
-    const idx = activeFilesList.length;
-    const name = DEMO_FILE_NAMES[idx % DEMO_FILE_NAMES.length];
-    const size = Math.floor(45000 + ((idx * 137000) % 2500000));
-    const expireTime = new Date(now + (6 * 24 * 3600 * 1000) - idx * 3600000).toISOString();
-
-    activeFilesList.push({
-      id: `file-demo-${idx + 1}`,
-      name: `${idx > 19 ? `v${Math.floor(idx / 10)}-` : ""}${name}`,
-      size,
-      roomCode: "",
-      expiresAt: expireTime,
-    });
-  }
-
-  // Build users list matching totalUsersCount
-  const recentUsersList: UserStatItem[] = DEMO_UPLOADERS.slice(0, totalUsersCount).map((uploaderName, idx) => {
-    const userStats = uploaderMap.get(uploaderName);
-    return {
-      id: `user-${idx + 1}`,
-      uploaderName,
-      totalRooms: userStats?.rooms || Math.floor(4 + (idx * 3) % 8),
-      totalFiles: userStats?.files || Math.floor(8 + (idx * 5) % 18),
-      lastActive: userStats?.lastActive || new Date(now - idx * 5 * 3600 * 1000).toISOString(),
-    };
-  });
+  const totalUsersCount = Math.max(mockPageSessions.size, uploaderMap.size);
 
   return {
     users: totalUsersCount,
