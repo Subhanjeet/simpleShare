@@ -12,6 +12,8 @@ import {
   mockGetAppStats,
 } from "./mock-store";
 
+const fallbackPageSessions = new Set<string>();
+
 function getSupabaseHostname(url: string): string {
   if (!url) return "N/A (Missing)";
   try {
@@ -233,11 +235,11 @@ export async function createRoomInStore(
     }
   }
 
-  // Atomically record lifetime share & user session stats using RPC with table fallback
-  const cleanSessionId = sessionId && sessionId.trim() ? sessionId.trim() : null;
+  // Atomically record lifetime share & user session stats using RPC with table/memory fallback
+  const activeSessionId = sessionId && sessionId.trim() ? sessionId.trim() : `sess-${crypto.randomUUID()}`;
 
   const { error: rpcError } = await supabase.rpc("record_share_event", {
-    p_session_id: cleanSessionId,
+    p_session_id: activeSessionId,
   });
 
   if (rpcError) {
@@ -245,16 +247,18 @@ export async function createRoomInStore(
 
     // Fallback if RPC fails or table is unmigrated
     let isNewSession = false;
-    if (cleanSessionId) {
-      const { data: insertedSession } = await supabase
-        .from("page_sessions")
-        .insert({ id: cleanSessionId })
-        .select("id")
-        .maybeSingle();
+    const { data: insertedSession, error: insertErr } = await supabase
+      .from("page_sessions")
+      .insert({ id: activeSessionId })
+      .select("id")
+      .maybeSingle();
 
-      if (insertedSession) {
-        isNewSession = true;
-      }
+    if (!insertErr && insertedSession) {
+      isNewSession = true;
+    } else if (!fallbackPageSessions.has(activeSessionId)) {
+      // Robust memory fallback if page_sessions DB table is not migrated yet
+      fallbackPageSessions.add(activeSessionId);
+      isNewSession = true;
     }
 
     const { data: currentStats } = await supabase

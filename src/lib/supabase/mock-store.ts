@@ -233,10 +233,9 @@ export async function mockGetAppStats(): Promise<AppStats> {
     });
   }
 
-  // Populate realistic baseline demo stats if lower than benchmark values (10 users, 49 shares, 35 files)
-  const totalSharesCount = Math.max(49, mockSharesCount, activeSharesList.length);
-  const totalUsersCount = Math.max(10, mockPageSessions.size, uploaderMap.size);
-  const targetFilesCount = Math.max(35, activeFilesList.length);
+  const totalSharesCount = Math.max(mockSharesCount, activeSharesList.length);
+  const totalUsersCount = Math.max(mockPageSessions.size, uploaderMap.size, 1);
+  const targetFilesCount = activeFilesList.length;
 
   // Fill activeSharesList up to totalSharesCount if needed
   while (activeSharesList.length < Math.min(totalSharesCount, 49)) {
