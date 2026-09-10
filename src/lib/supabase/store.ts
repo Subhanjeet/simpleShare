@@ -516,7 +516,7 @@ export async function getAppStatsFromStore(): Promise<AppStats> {
   }
 
   const recentUsersList: UserStatItem[] = Array.from(uploaderMap.entries()).map(([uploaderName, stats], idx) => ({
-    id: `user-${idx + 1}`,
+    id: `uploader-${idx + 1}`,
     uploaderName,
     totalRooms: stats.rooms,
     totalFiles: stats.files,

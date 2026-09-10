@@ -221,15 +221,15 @@ export async function mockGetAppStats(): Promise<AppStats> {
   }
 
   const recentUsersList: UserStatItem[] = Array.from(uploaderMap.entries()).map(([uploaderName, stats], idx) => ({
-    id: `user-${idx + 1}`,
+    id: `uploader-${idx + 1}`,
     uploaderName,
     totalRooms: stats.rooms,
     totalFiles: stats.files,
     lastActive: stats.lastActive,
   }));
 
-  const totalSharesCount = Math.max(mockSharesCount, activeSharesList.length);
-  const totalUsersCount = Math.max(mockPageSessions.size, uploaderMap.size);
+  const totalSharesCount = mockSharesCount;
+  const totalUsersCount = mockPageSessions.size;
 
   return {
     users: totalUsersCount,
